@@ -5,11 +5,14 @@ local dalgi = require("dalgi")
 local BG_COLOR = { 254, 254, 254 }
 local FONT_PATH = "NanumMyeongjo.ttc"
 local FONT_POINT_SIZE = 18
-local WINDOW_SIZE = {w = 500, h = 500}
+local WINDOW_SIZE = {w = 400, h = 200}
 local DEFAULT_TITLE = "Derömanizer"
 local PADDING = 10
 local INPUT_CHAR = "_"
 local ICON_FILE = "icon.png"
+local REPEAT_INITIAL_DELAY = 0.2
+local REPEAT_DELAY = 0.1
+local REPEAT_DEFAULT = -(REPEAT_INITIAL_DELAY - REPEAT_DELAY)
 
 local g_history
 local g_history_index
@@ -20,6 +23,18 @@ local g_unconverted
 local g_font
 local g_label
 local g_output_file
+local g_is_deleting_backwards = false
+local g_is_repeating = false
+local g_repeat_timer = REPEAT_DEFAULT
+
+function start_repeat()
+    g_repeat_timer = REPEAT_DEFAULT
+    g_is_repeating = true
+end
+
+function stop_repeat()
+    g_is_repeating = false
+end
 
 local MODES = {
     default = 1,
@@ -44,6 +59,11 @@ function toggle_mode(mode_name)
             g_mode = "output"
         end
     end
+end
+
+function show_usage()
+    print("Usage: derowin [mode] [x,y,w,h | ne|se|sw|nw ]")
+    love.event.quit()
 end
 
 function love.load()    
@@ -71,13 +91,61 @@ function love.load()
         if MODES[mode] ~= nil then
             toggle_mode(mode)
         else
-            print("Usage: derowin [mode]")
             print("Valid modes:")
             for mode, _ in pairs(MODES) do
                 print("- "..mode)
             end
-            love.event.quit()
+            show_usage()
         end
+    end
+    if #arg > 2 then
+        local rect = arg[3]
+        local parts = {}
+        for part in rect:gmatch("%-?%d+") do
+            table.insert(parts, tonumber(part))
+        end
+        
+        local x, y, display = love.window.getPosition()
+        local w, h = WINDOW_SIZE.w, WINDOW_SIZE.h
+        local dw, dh = love.window.getDesktopDimensions( display )
+        
+        if #parts == 0 then
+            if rect == "ne" then
+                x = -WINDOW_SIZE.w
+                y = 0
+            elseif rect == "se" then
+                x = -WINDOW_SIZE.w
+                y = -WINDOW_SIZE.h
+            elseif rect == "nw" then
+                x = 0
+                y = 0
+            elseif rect == "sw" then
+                x = 0
+                y = -WINDOW_SIZE.h
+            else
+                show_usage()
+            end
+        end
+        
+        x = parts[1] or x
+        y = parts[2] or y
+        w = parts[3] or w
+        h = parts[4] or h
+        while x < 0 do
+            x = x + dw
+        end
+        while y < 0 do
+            y = y + dh
+        end
+        if (dw - x) < w then
+            w = dw - x
+        end
+        if (dh - y) < h then
+            h = dh - y
+        end
+        _, _, flags = love.window.getMode()
+        love.window.setMode(w, h, flags)
+        love.window.setPosition(x, y, display)
     end
 end
 
@@ -243,11 +311,20 @@ function love.keypressed(key, scancode, is_repeat)
             end
         elseif key == "backspace" then
             text_delete_backwards()
+            g_is_deleting_backwards = true
+            start_repeat()
         elseif key == "up" then
             move_back_history()
         elseif key == "down" then
             move_forward_history()
         end
+    end
+end
+
+function love.keyreleased(key, scancode)
+    if key == "backspace" then
+        stop_repeat()
+        g_is_deleting_backwards = false
     end
 end
 
@@ -260,6 +337,15 @@ function love.resize(w, h)
 end
 
 function love.update(dt)
+    if g_is_repeating then
+        g_repeat_timer = g_repeat_timer + dt
+        if g_repeat_timer > REPEAT_DELAY then
+            g_repeat_timer = g_repeat_timer - REPEAT_DELAY
+            if g_is_deleting_backwards then
+                text_delete_backwards()
+            end
+        end
+    end
 end
 
 function love.quit()
